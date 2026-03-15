@@ -129,6 +129,7 @@ All state is stored in `localStorage` with these key patterns:
 | `column.{x}.{y}`       | Folder ID at column x, row y                 |
 | `open.{folderId}`       | Whether a folder is expanded (if remember_open enabled) |
 | `options.{configKey}`   | User configuration values                    |
+| `favicon_cache`         | JSON map of URL → data URI for cached favicons |
 
 ---
 
@@ -153,6 +154,7 @@ The entry point is an `addEventListener('DOMContentLoaded', ...)` handler that:
 | `renderColumn(index, target)` | Renders an entire column with all its folders |
 | `renderColumns()` | Main render — builds all columns and appends to page |
 | `renderMenu(items, x, y)` | Creates and displays a context menu at given coordinates |
+| `renderTimezones()` | Renders the timezone comparison widget with linked sliders |
 
 #### Folder Management
 
@@ -265,13 +267,35 @@ The `config` object defines all user-configurable options with their defaults:
   css: '',                   // Custom CSS
   number_top: 10,            // Number of most visited items (1-10)
   number_closed: 10,         // Number of recently closed items (1-25)
-  number_recent: 10          // Number of recent bookmarks (1-1000)
+  number_recent: 10,         // Number of recent bookmarks (1-1000)
+
+  // Timezones
+  show_timezones: 0,         // Show timezone comparison widget
+  tz_1: 'America/New_York',  // IANA timezone 1
+  tz_label_1: 'New York',    // Display label 1
+  tz_2: 'Europe/London',     // IANA timezone 2
+  tz_label_2: 'London',      // Display label 2
+  tz_3: 'Asia/Kolkata',      // IANA timezone 3
+  tz_label_3: 'Mumbai',      // Display label 3
+  tz_4: 'Asia/Tokyo',        // IANA timezone 4
+  tz_label_4: 'Tokyo',       // Display label 4
+
+  // Search
+  show_search: 0             // Enable search bar (activated with / key)
 }
 ```
 
 ### Built-in Themes
 
-11 themes are available: **Default**, **Classic**, **Dusk**, **Elegant**, **Frosty**, **Hacker**, **Melon**, **Midnight**, **Slate**, **Trees**, **Valentine**, **Warm**. Each theme overrides the color-related config keys.
+12 themes are available: **System** (auto-detects light/dark via `prefers-color-scheme`), **Default**, **Classic**, **Dusk**, **Elegant**, **Frosty**, **Hacker**, **Melon**, **Midnight**, **Slate**, **Trees**, **Valentine**, **Warm**. Each theme overrides the color-related config keys.
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `/` | Open search bar (if enabled in settings) |
+| `1`-`9` | Toggle the Nth top-level folder |
+| `Escape` | Close search bar, or collapse all open folders |
 
 ---
 

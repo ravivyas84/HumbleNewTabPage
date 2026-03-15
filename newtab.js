@@ -324,12 +324,14 @@ function onMenuClick(item) {
 function renderMenu(items, x, y) {
 	var ul = document.createElement('ul');
 	ul.className = 'menu';
+	ul.setAttribute('role', 'menu');
 	for (var i = 0; i < items.length; i++) {
 		var li = document.createElement('li');
 		if (items[i]) {
 			var a = document.createElement('a');
 			a.innerText = items[i].label;
 			a.tabIndex = 0;
+			a.setAttribute('role', 'menuitem');
 			a.onclick = onMenuClick(items[i]);
 
 			li.appendChild(a);
@@ -662,8 +664,10 @@ function getSubTree(id, callback) {
 function setClass(target, node, isopen) {
 	if (node.className)
 		target.classList.add(node.className);
-	if (node.children)
+	if (node.children) {
 		target.classList.add('folder');
+		target.setAttribute('aria-expanded', isopen ? 'true' : 'false');
+	}
 	if (isopen)
 		target.classList.add('open');
 	else
@@ -701,11 +705,34 @@ function getIcon(node) {
 		url2x = `/_favicon/?pageUrl=${encodeURIComponent(node.url)}&size=32`;
 	}
 
+	// check favicon cache
+	if (url && node.url && faviconCache[node.url]) {
+		var icon = document.createElement('img');
+		icon.className = 'icon';
+		icon.src = faviconCache[node.url];
+		icon.alt = ' ';
+		return icon;
+	}
+
 	var icon = document.createElement(url ? 'img' : 'div');
 	icon.className = 'icon';
 	icon.src = url;
 	if (url2x) icon.srcset = url2x + ' 2x';
 	icon.alt = ' ';
+
+	// cache favicon on load
+	if (url && node.url && !faviconCache[node.url]) {
+		icon.addEventListener('load', function() {
+			try {
+				var canvas = document.createElement('canvas');
+				canvas.width = 16;
+				canvas.height = 16;
+				var ctx = canvas.getContext('2d');
+				ctx.drawImage(icon, 0, 0, 16, 16);
+				cacheFavicon(node.url, canvas.toDataURL('image/png'));
+			} catch(e) {}
+		}, { once: true });
+	}
 	return icon;
 }
 
@@ -1093,11 +1120,22 @@ var config = {
 	css: '',
 	number_top: 10,
 	number_closed: 10,
-	number_recent: 10
+	number_recent: 10,
+	show_timezones: 0,
+	tz_1: 'America/New_York',
+	tz_label_1: 'New York',
+	tz_2: 'Europe/London',
+	tz_label_2: 'London',
+	tz_3: 'Asia/Kolkata',
+	tz_label_3: 'Mumbai',
+	tz_4: 'Asia/Tokyo',
+	tz_label_4: 'Tokyo',
+	show_search: 0
 };
 
 // color theme values
 var themes = {
+	System: {},
 	Default: {},
 	Classic: {
 		font_color: '#000000',
@@ -1200,13 +1238,20 @@ function setConfig(key, value) {
 	if (key == 'lock' || key == 'newtab' || key == 'show_root' || key.substring(0,6) == 'number')
 		loadColumns();
 	else if (key == 'theme') {
-		theme = themes[value];
+		if (value === 'System')
+			theme = getSystemTheme();
+		else
+			theme = themes[value];
 		for (var i in config) {
 			if (i != key) {
 				onChange(i);
 				showConfig(i);
 			}
 		}
+	} else if (key === 'show_timezones' || key.substring(0,3) === 'tz_') {
+		renderTimezones();
+	} else if (key === 'show_search') {
+		// toggle only; search bar activated via keyboard shortcut
 	} else if (key.substring(0,4) == 'show') {
 		var id = key.substring(5);
 		if (!value) {
@@ -1227,13 +1272,13 @@ var styles = {};
 function getStyle(key, value) {
 	switch(key) {
 		case 'font':
-			return '#main a { font-family: "' + value + '"; }';
+			return '#main a, #timezones, #search_input { font-family: "' + value + '"; }';
 		case 'font_size':
 			return '#main a { font-size: ' + (value / 10) + 'em; }';
 		case 'font_weight':
 			return '#main a { font-weight: ' + value + '; }';
 		case 'font_color':
-			return '#main a { color: ' + value + '; }';
+			return '#main a, .tz-label, .tz-time { color: ' + value + '; }';
 		case 'background_color':
 			return 'body { background-color: ' + value + '; }';
 		case 'background_image':
@@ -1265,9 +1310,10 @@ function getStyle(key, value) {
 							'padding-left: ' + scale(value, .8, 2, .4) + 'em; ' +
 							'padding-right: ' + scale(value, .8, 2, .4) + 'em; }';
 		case 'width':
-			return '#main { width: ' + (getConfig('auto_scale') ?
+			var w = getConfig('auto_scale') ?
 				scale(value, 80, 100, 20) + '%' :
-				scale(value, 1000, 3000, 400) + 'px') + '; }';
+				scale(value, 1000, 3000, 400) + 'px';
+			return '#main, #timezones, #search_bar { width: ' + w + '; }';
 		case 'h_pos':
 			var margin = 100 - scale(getConfig('width'), 80, 100, 20);
 			return '#main { left: ' + scale(value, 0, margin/2, -margin/2) + '%; }';
@@ -1280,7 +1326,7 @@ function getStyle(key, value) {
 		case 'css':
 			return value;
 		case 'auto_scale':
-			return value ? null : '#main { margin-top: 80px; width: 1000px; }';
+			return value ? null : '#main, #timezones, #search_bar { margin-top: 80px; width: 1000px; }';
 		default:
 			return null;
 	}
@@ -1356,7 +1402,11 @@ function onChange(key, value) {
 // loads config settings
 function loadSettings() {
 	// load theme
-	theme = themes[getConfig('theme')] || {};
+	var themeName = getConfig('theme');
+	if (themeName === 'System')
+		theme = typeof getSystemTheme === 'function' ? getSystemTheme() : {};
+	else
+		theme = themes[themeName] || {};
 	// load settings
 	for (var key in config)
 		if (key === 'background_image_file')
@@ -1470,7 +1520,7 @@ function initSettings() {
 				var exports = document.getElementById('options_export');
 				var imports = document.getElementById('options_import');
 				var replacer = function(key, value) {
-					if (key == 'options.background_image_file' || key == 'weather.cache') {
+					if (key == 'options.background_image_file' || key == 'weather.cache' || key == 'favicon_cache') {
 						return undefined;
 					}
 					return value;
@@ -1539,7 +1589,8 @@ function initSettings() {
 		if (select.childNodes.length === 0) {
 			for (var i in themes) {
 				var option = document.createElement('option');
-				option.innerText = i;
+				option.value = i;
+				option.innerText = i === 'System' ? 'System (auto)' : i;
 				if (i == getConfig('theme'))
 					option.selected = 'selected';
 				select.appendChild(option);
@@ -1578,9 +1629,277 @@ function showOptions(show) {
 	}
 }
 
+// ===== Timezone Widget =====
+var tzOffsetMinutes = 0; // offset from "now" applied by slider interaction
+var tzInterval = null;
+
+function getTimeInTimezone(tz, offsetMinutes) {
+	var now = new Date();
+	now.setMinutes(now.getMinutes() + offsetMinutes);
+	try {
+		var formatter = new Intl.DateTimeFormat('en-US', {
+			timeZone: tz,
+			hour: 'numeric',
+			minute: '2-digit',
+			hour12: true
+		});
+		var dayFormatter = new Intl.DateTimeFormat('en-US', {
+			timeZone: tz,
+			weekday: 'short'
+		});
+		return {
+			time: formatter.format(now),
+			day: dayFormatter.format(now),
+			minutes: getMinutesInTimezone(tz, now)
+		};
+	} catch(e) {
+		return { time: '—', day: '', minutes: 0 };
+	}
+}
+
+function getMinutesInTimezone(tz, date) {
+	try {
+		var parts = new Intl.DateTimeFormat('en-US', {
+			timeZone: tz,
+			hour: 'numeric',
+			minute: 'numeric',
+			hour12: false
+		}).formatToParts(date);
+		var h = 0, m = 0;
+		for (var i = 0; i < parts.length; i++) {
+			if (parts[i].type === 'hour') h = parseInt(parts[i].value, 10);
+			if (parts[i].type === 'minute') m = parseInt(parts[i].value, 10);
+		}
+		if (h === 24) h = 0;
+		return h * 60 + m;
+	} catch(e) {
+		return 0;
+	}
+}
+
+function renderTimezones() {
+	var container = document.getElementById('timezones');
+	container.innerHTML = '';
+
+	if (!getConfig('show_timezones')) {
+		container.classList.remove('visible');
+		if (tzInterval) { clearInterval(tzInterval); tzInterval = null; }
+		return;
+	}
+	container.classList.add('visible');
+	tzOffsetMinutes = 0;
+
+	var sliders = [];
+	var timeLabels = [];
+	var dayLabels = [];
+
+	for (var i = 1; i <= 4; i++) {
+		var tz = getConfig('tz_' + i);
+		var label = getConfig('tz_label_' + i);
+		if (!tz || !label) continue;
+
+		var row = document.createElement('div');
+		row.className = 'tz-row';
+
+		var labelEl = document.createElement('span');
+		labelEl.className = 'tz-label';
+		labelEl.textContent = label;
+
+		var slider = document.createElement('input');
+		slider.type = 'range';
+		slider.className = 'tz-slider';
+		slider.min = 0;
+		slider.max = 1439;
+		slider.step = 1;
+		slider.setAttribute('data-tz', tz);
+		slider.setAttribute('aria-label', label + ' timezone slider');
+
+		var timeEl = document.createElement('span');
+		timeEl.className = 'tz-time';
+
+		var dayEl = document.createElement('span');
+		dayEl.className = 'tz-day';
+
+		row.appendChild(labelEl);
+		row.appendChild(slider);
+		row.appendChild(timeEl);
+		row.appendChild(dayEl);
+		container.appendChild(row);
+
+		sliders.push(slider);
+		timeLabels.push(timeEl);
+		dayLabels.push(dayEl);
+	}
+
+	function updateAllSliders() {
+		for (var j = 0; j < sliders.length; j++) {
+			var tz = sliders[j].getAttribute('data-tz');
+			var info = getTimeInTimezone(tz, tzOffsetMinutes);
+			sliders[j].value = info.minutes;
+			timeLabels[j].textContent = info.time;
+			dayLabels[j].textContent = info.day;
+		}
+	}
+
+	// attach input handlers
+	for (var k = 0; k < sliders.length; k++) {
+		(function(index) {
+			sliders[index].addEventListener('input', function() {
+				var tz = this.getAttribute('data-tz');
+				var currentMinutes = getMinutesInTimezone(tz, new Date());
+				var sliderMinutes = parseInt(this.value, 10);
+				var diff = sliderMinutes - currentMinutes;
+				// wrap around midnight
+				if (diff > 720) diff -= 1440;
+				if (diff < -720) diff += 1440;
+				tzOffsetMinutes = diff;
+				updateAllSliders();
+				// restore this slider's exact position since updateAllSliders may round
+				sliders[index].value = sliderMinutes;
+			});
+			sliders[index].addEventListener('dblclick', function() {
+				tzOffsetMinutes = 0;
+				updateAllSliders();
+			});
+		})(k);
+	}
+
+	updateAllSliders();
+
+	// tick every minute
+	if (tzInterval) clearInterval(tzInterval);
+	tzInterval = setInterval(function() {
+		if (tzOffsetMinutes === 0) updateAllSliders();
+	}, 60000);
+}
+
+// ===== Search / Filter =====
+var searchVisible = false;
+
+function showSearch(show) {
+	var bar = document.getElementById('search_bar');
+	var input = document.getElementById('search_input');
+	searchVisible = show;
+	if (show) {
+		bar.classList.add('visible');
+		input.value = '';
+		input.focus();
+		clearSearchFilter();
+	} else {
+		bar.classList.remove('visible');
+		input.value = '';
+		clearSearchFilter();
+	}
+}
+
+function clearSearchFilter() {
+	var items = document.querySelectorAll('#main li');
+	for (var i = 0; i < items.length; i++)
+		items[i].classList.remove('search-hidden');
+}
+
+function applySearchFilter(query) {
+	if (!query) {
+		clearSearchFilter();
+		return;
+	}
+	query = query.toLowerCase();
+	var items = document.querySelectorAll('#main li');
+	for (var i = 0; i < items.length; i++) {
+		var a = items[i].querySelector('a');
+		if (!a) continue;
+		var text = (a.textContent || '').toLowerCase();
+		var href = (a.href || '').toLowerCase();
+		var isFolder = a.classList.contains('folder');
+		// always show folders so their children remain accessible
+		if (isFolder) {
+			items[i].classList.remove('search-hidden');
+		} else if (text.indexOf(query) > -1 || href.indexOf(query) > -1) {
+			items[i].classList.remove('search-hidden');
+		} else {
+			items[i].classList.add('search-hidden');
+		}
+	}
+}
+
+// ===== Dark Mode Auto-Detection (System theme) =====
+var darkModeQuery = window.matchMedia('(prefers-color-scheme: dark)');
+
+function getSystemTheme() {
+	return darkModeQuery.matches ? themes['Midnight'] : themes['Default'];
+}
+
+function onSystemThemeChange() {
+	if (getConfig('theme') === 'System') {
+		theme = getSystemTheme();
+		for (var key in config) {
+			if (key !== 'theme') {
+				onChange(key);
+				if (settingsInitialized) showConfig(key);
+			}
+		}
+		renderTimezones();
+	}
+}
+
+darkModeQuery.addEventListener('change', onSystemThemeChange);
+
+// ===== Favicon Caching =====
+var faviconCache = {};
+var FAVICON_CACHE_KEY = 'favicon_cache';
+var FAVICON_CACHE_MAX = 200;
+
+function loadFaviconCache() {
+	try {
+		var data = localStorage.getItem(FAVICON_CACHE_KEY);
+		if (data) faviconCache = JSON.parse(data);
+	} catch(e) {
+		faviconCache = {};
+	}
+}
+
+function saveFaviconCache() {
+	try {
+		// prune if too large
+		var keys = Object.keys(faviconCache);
+		if (keys.length > FAVICON_CACHE_MAX) {
+			var toRemove = keys.slice(0, keys.length - FAVICON_CACHE_MAX);
+			for (var i = 0; i < toRemove.length; i++)
+				delete faviconCache[toRemove[i]];
+		}
+		localStorage.setItem(FAVICON_CACHE_KEY, JSON.stringify(faviconCache));
+	} catch(e) {}
+}
+
+function cacheFavicon(url, dataUri) {
+	if (dataUri && dataUri.length < 10000) {
+		faviconCache[url] = dataUri;
+		saveFaviconCache();
+	}
+}
+
+loadFaviconCache();
+
+// ===== Accessibility Helpers =====
+function addAriaAttributes() {
+	// options button
+	var optBtn = document.getElementById('options_button');
+	if (optBtn) {
+		optBtn.setAttribute('role', 'button');
+		optBtn.setAttribute('aria-label', 'Open options');
+	}
+	// close button
+	var closeBtn = document.getElementById('options_close_button');
+	if (closeBtn) {
+		closeBtn.setAttribute('role', 'button');
+		closeBtn.setAttribute('aria-label', 'Close options');
+	}
+}
+
 // initialize page
 loadSettings();
 loadColumns();
+addAriaAttributes();
 
 // keyboard shortcuts
 document.addEventListener('keypress', function(event) {
@@ -1594,6 +1913,57 @@ document.addEventListener('mousedown', function(event) {
 });
 document.addEventListener('keydown', function(event) {
 	document.body.classList.remove('hide-focus');
+
+	// don't handle shortcuts if typing in an input
+	var tag = event.target.tagName;
+	if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+		// Escape closes search bar
+		if (event.keyCode === 27 && searchVisible) {
+			showSearch(false);
+			event.preventDefault();
+		}
+		return;
+	}
+
+	// "/" to open search
+	if (event.key === '/' && getConfig('show_search')) {
+		showSearch(true);
+		event.preventDefault();
+		return;
+	}
+
+	// Escape to collapse all open folders or close search
+	if (event.keyCode === 27) {
+		if (searchVisible) {
+			showSearch(false);
+		} else {
+			var openFolders = document.querySelectorAll('#main a.open');
+			for (var i = 0; i < openFolders.length; i++) {
+				if (openFolders[i].onclick) openFolders[i].onclick();
+			}
+		}
+		event.preventDefault();
+		return;
+	}
+
+	// 1-9 to toggle top-level folders
+	if (event.key >= '1' && event.key <= '9') {
+		var folderIndex = parseInt(event.key, 10) - 1;
+		var topFolders = document.querySelectorAll('#main > .column > ul > li > a.folder');
+		if (folderIndex < topFolders.length && topFolders[folderIndex].onclick) {
+			topFolders[folderIndex].onclick();
+			event.preventDefault();
+		}
+		return;
+	}
+});
+
+// search bar event handlers
+document.getElementById('search_input').addEventListener('input', function() {
+	applySearchFilter(this.value);
+});
+document.getElementById('search_close').addEventListener('click', function() {
+	showSearch(false);
 });
 
 window.onresize = function(event) {
@@ -1607,6 +1977,9 @@ document.getElementById('options_button').onclick = function() {
 };
 if (location.search === '?options')
 	showOptions(true);
+
+// render timezone widget
+renderTimezones();
 
 // refresh recently closed
 if (chrome.sessions)

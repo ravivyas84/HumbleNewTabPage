@@ -7,6 +7,8 @@
 <link rel="icon" href="icons/icon_16.png">
 </head>
 <body>
+<div id="timezones"></div>
+<div id="search_bar"><input id="search_input" type="text" placeholder="Search bookmarks..." /><a id="search_close" title="Close">&times;</a></div>
 <div id="main">
 </div>
 <a id="options_button" title="Options" tabindex="0"></a>
@@ -43,6 +45,19 @@
 		<label><span>Recently closed</span><input id="options_show_closed" type="checkbox"/></label>
 		<label class="subopt"><span>Number of items</span><input id="options_number_closed" type="number" min="1" max="25"/></label>
 		<label><span>Other devices</span><input id="options_show_devices" type="checkbox"/></label>
+		<label><span>Search bar (<kbd>/</kbd>)</span><input id="options_show_search" type="checkbox"/></label>
+	</fieldset>
+	<fieldset>
+		<legend>Timezones</legend>
+		<label><span>Show timezones</span><input id="options_show_timezones" type="checkbox"/></label>
+		<label class="subopt"><span>Label 1</span><input id="options_tz_label_1" type="text" placeholder="New York"/></label>
+		<label class="subopt"><span>Timezone 1</span><input id="options_tz_1" type="text" placeholder="America/New_York"/></label>
+		<label class="subopt"><span>Label 2</span><input id="options_tz_label_2" type="text" placeholder="London"/></label>
+		<label class="subopt"><span>Timezone 2</span><input id="options_tz_2" type="text" placeholder="Europe/London"/></label>
+		<label class="subopt"><span>Label 3</span><input id="options_tz_label_3" type="text" placeholder="Mumbai"/></label>
+		<label class="subopt"><span>Timezone 3</span><input id="options_tz_3" type="text" placeholder="Asia/Kolkata"/></label>
+		<label class="subopt"><span>Label 4</span><input id="options_tz_label_4" type="text" placeholder="Tokyo"/></label>
+		<label class="subopt"><span>Timezone 4</span><input id="options_tz_4" type="text" placeholder="Asia/Tokyo"/></label>
 	</fieldset>
 	</div><div class="section">
 	<fieldset>
