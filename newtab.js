@@ -1122,6 +1122,7 @@ var config = {
 	number_closed: 10,
 	number_recent: 10,
 	show_timezones: 0,
+	tz_home: '1',
 	tz_1: 'America/New_York',
 	tz_label_1: 'New York',
 	tz_2: 'Europe/London',
@@ -1632,6 +1633,7 @@ function showOptions(show) {
 // ===== Timezone Widget =====
 var tzOffsetMinutes = 0; // offset from "now" applied by slider interaction
 var tzInterval = null;
+var tzData = []; // { tz, label, slider, timeDisplay, ticksContainer, isHome }
 
 function getTimeInTimezone(tz, offsetMinutes) {
 	var now = new Date();
@@ -1653,7 +1655,7 @@ function getTimeInTimezone(tz, offsetMinutes) {
 			minutes: getMinutesInTimezone(tz, now)
 		};
 	} catch(e) {
-		return { time: '—', day: '', minutes: 0 };
+		return { time: '\u2014', day: '', minutes: 0 };
 	}
 }
 
@@ -1677,9 +1679,96 @@ function getMinutesInTimezone(tz, date) {
 	}
 }
 
+// format hour number to label: 0->"12a", 6->"6a", 12->"12p", 18->"6p"
+function formatHourLabel(h) {
+	h = ((h % 24) + 24) % 24;
+	if (h === 0) return '12a';
+	if (h === 12) return '12p';
+	if (h < 12) return h + 'a';
+	return (h - 12) + 'p';
+}
+
+// get the UTC offset in minutes for a timezone at a given date
+function getUtcOffset(tz, date) {
+	try {
+		var parts = new Intl.DateTimeFormat('en-US', {
+			timeZone: tz,
+			hour: 'numeric',
+			minute: 'numeric',
+			hour12: false,
+			year: 'numeric',
+			month: '2-digit',
+			day: '2-digit'
+		}).formatToParts(date);
+		var h = 0, m = 0, Y = 0, M = 0, D = 0;
+		for (var i = 0; i < parts.length; i++) {
+			if (parts[i].type === 'hour') h = parseInt(parts[i].value, 10);
+			if (parts[i].type === 'minute') m = parseInt(parts[i].value, 10);
+			if (parts[i].type === 'year') Y = parseInt(parts[i].value, 10);
+			if (parts[i].type === 'month') M = parseInt(parts[i].value, 10);
+			if (parts[i].type === 'day') D = parseInt(parts[i].value, 10);
+		}
+		if (h === 24) h = 0;
+		// local time in that tz as minutes since epoch-ish
+		var localMinutes = ((Y * 400 + M * 32 + D) * 1440) + h * 60 + m;
+		// utc time
+		var utcH = date.getUTCHours(), utcM = date.getUTCMinutes();
+		var utcY = date.getUTCFullYear(), utcMo = date.getUTCMonth() + 1, utcD = date.getUTCDate();
+		var utcMinutes = ((utcY * 400 + utcMo * 32 + utcD) * 1440) + utcH * 60 + utcM;
+		return localMinutes - utcMinutes;
+	} catch(e) {
+		return 0;
+	}
+}
+
+// update tick marks on all bars based on the hovered bar's timezone
+function updateTicks(hoveredIndex) {
+	var now = new Date();
+	now.setMinutes(now.getMinutes() + tzOffsetMinutes);
+
+	var hoveredTz = tzData[hoveredIndex].tz;
+	var hoveredOffset = getUtcOffset(hoveredTz, now);
+
+	// generate tick hours in the hovered timezone (every 3 hours)
+	var tickHours = [0, 3, 6, 9, 12, 15, 18, 21];
+
+	for (var i = 0; i < tzData.length; i++) {
+		var entry = tzData[i];
+		var container = entry.ticksContainer;
+		container.innerHTML = '';
+
+		var thisOffset = getUtcOffset(entry.tz, now);
+		var diffMinutes = thisOffset - hoveredOffset;
+
+		for (var t = 0; t < tickHours.length; t++) {
+			var hoveredMinute = tickHours[t] * 60; // minute-of-day in hovered tz
+			var localMinute = hoveredMinute + diffMinutes;
+			// wrap to 0-1439
+			localMinute = ((localMinute % 1440) + 1440) % 1440;
+
+			var pct = (localMinute / 1439) * 100;
+
+			// tick line
+			var tick = document.createElement('div');
+			tick.className = 'tz-tick';
+			tick.style.left = pct + '%';
+			container.appendChild(tick);
+
+			// tick label — show the local hour in this timezone
+			var localHour = Math.floor(localMinute / 60);
+			var label = document.createElement('div');
+			label.className = 'tz-tick-label';
+			label.textContent = formatHourLabel(localHour);
+			label.style.left = pct + '%';
+			container.appendChild(label);
+		}
+	}
+}
+
 function renderTimezones() {
 	var container = document.getElementById('timezones');
 	container.innerHTML = '';
+	tzData = [];
 
 	if (!getConfig('show_timezones')) {
 		container.classList.remove('visible');
@@ -1689,21 +1778,40 @@ function renderTimezones() {
 	container.classList.add('visible');
 	tzOffsetMinutes = 0;
 
-	var sliders = [];
-	var timeLabels = [];
-	var dayLabels = [];
+	var homeIndex = parseInt(getConfig('tz_home'), 10) || 1;
 
 	for (var i = 1; i <= 4; i++) {
 		var tz = getConfig('tz_' + i);
-		var label = getConfig('tz_label_' + i);
-		if (!tz || !label) continue;
+		var labelText = getConfig('tz_label_' + i);
+		if (!tz || !labelText) continue;
+
+		var isHome = (i === homeIndex);
 
 		var row = document.createElement('div');
-		row.className = 'tz-row';
+		row.className = 'tz-row' + (isHome ? ' tz-row-home' : '');
 
+		// label
 		var labelEl = document.createElement('span');
 		labelEl.className = 'tz-label';
-		labelEl.textContent = label;
+		labelEl.textContent = labelText;
+		if (isHome) {
+			var badge = document.createElement('span');
+			badge.className = 'tz-home-badge';
+			badge.textContent = 'home';
+			labelEl.appendChild(badge);
+		}
+
+		// bar wrapper
+		var barWrapper = document.createElement('div');
+		barWrapper.className = 'tz-bar-wrapper';
+
+		// time display above bar
+		var timeDisplay = document.createElement('div');
+		timeDisplay.className = 'tz-time-display';
+
+		// bar container (slider + ticks)
+		var barContainer = document.createElement('div');
+		barContainer.className = 'tz-bar-container';
 
 		var slider = document.createElement('input');
 		slider.type = 'range';
@@ -1712,52 +1820,65 @@ function renderTimezones() {
 		slider.max = 1439;
 		slider.step = 1;
 		slider.setAttribute('data-tz', tz);
-		slider.setAttribute('aria-label', label + ' timezone slider');
+		slider.setAttribute('data-index', String(tzData.length));
+		slider.setAttribute('aria-label', labelText + ' timezone slider');
 
-		var timeEl = document.createElement('span');
-		timeEl.className = 'tz-time';
+		var ticksContainer = document.createElement('div');
+		ticksContainer.className = 'tz-ticks';
 
-		var dayEl = document.createElement('span');
-		dayEl.className = 'tz-day';
-
+		barContainer.appendChild(slider);
+		barContainer.appendChild(ticksContainer);
+		barWrapper.appendChild(timeDisplay);
+		barWrapper.appendChild(barContainer);
 		row.appendChild(labelEl);
-		row.appendChild(slider);
-		row.appendChild(timeEl);
-		row.appendChild(dayEl);
+		row.appendChild(barWrapper);
 		container.appendChild(row);
 
-		sliders.push(slider);
-		timeLabels.push(timeEl);
-		dayLabels.push(dayEl);
+		tzData.push({
+			tz: tz,
+			label: labelText,
+			slider: slider,
+			timeDisplay: timeDisplay,
+			ticksContainer: ticksContainer,
+			isHome: isHome
+		});
 	}
 
 	function updateAllSliders() {
-		for (var j = 0; j < sliders.length; j++) {
-			var tz = sliders[j].getAttribute('data-tz');
-			var info = getTimeInTimezone(tz, tzOffsetMinutes);
-			sliders[j].value = info.minutes;
-			timeLabels[j].textContent = info.time;
-			dayLabels[j].textContent = info.day;
+		for (var j = 0; j < tzData.length; j++) {
+			var info = getTimeInTimezone(tzData[j].tz, tzOffsetMinutes);
+			tzData[j].slider.value = info.minutes;
+			tzData[j].timeDisplay.textContent = info.time + '  ' + info.day;
 		}
 	}
 
-	// attach input handlers
-	for (var k = 0; k < sliders.length; k++) {
+	// hover handlers for ticks
+	for (var k = 0; k < tzData.length; k++) {
 		(function(index) {
-			sliders[index].addEventListener('input', function() {
+			var row = tzData[index].slider.closest('.tz-row');
+			row.addEventListener('mouseenter', function() {
+				container.classList.add('show-ticks');
+				updateTicks(index);
+			});
+			row.addEventListener('mouseleave', function() {
+				container.classList.remove('show-ticks');
+			});
+
+			// slider input handler
+			tzData[index].slider.addEventListener('input', function() {
 				var tz = this.getAttribute('data-tz');
 				var currentMinutes = getMinutesInTimezone(tz, new Date());
 				var sliderMinutes = parseInt(this.value, 10);
 				var diff = sliderMinutes - currentMinutes;
-				// wrap around midnight
 				if (diff > 720) diff -= 1440;
 				if (diff < -720) diff += 1440;
 				tzOffsetMinutes = diff;
 				updateAllSliders();
-				// restore this slider's exact position since updateAllSliders may round
-				sliders[index].value = sliderMinutes;
+				tzData[index].slider.value = sliderMinutes;
+				if (container.classList.contains('show-ticks'))
+					updateTicks(index);
 			});
-			sliders[index].addEventListener('dblclick', function() {
+			tzData[index].slider.addEventListener('dblclick', function() {
 				tzOffsetMinutes = 0;
 				updateAllSliders();
 			});
