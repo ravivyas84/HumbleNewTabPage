@@ -1579,9 +1579,15 @@ function initSettings() {
 			select.id = input.id;
 		}
 
+		// populate timezone selects
+		populateTimezoneSelects();
+
 		// show settings
 		for (var key in config)
 			initConfig(key);
+
+		// auto-fill labels when timezone changes
+		bindTimezoneAutoLabel();
 
 		loadSettings();
 
@@ -1627,6 +1633,123 @@ function showOptions(show) {
 			initSettings();
 		for (var key in config)
 			showConfig(key);
+	}
+}
+
+// ===== Timezone Picker =====
+var TZ_COMMON = [
+	'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+	'America/Anchorage', 'Pacific/Honolulu', 'America/Toronto', 'America/Vancouver',
+	'America/Mexico_City', 'America/Bogota', 'America/Lima', 'America/Sao_Paulo',
+	'America/Argentina/Buenos_Aires', 'America/Santiago',
+	'Europe/London', 'Europe/Dublin', 'Europe/Paris', 'Europe/Berlin',
+	'Europe/Madrid', 'Europe/Rome', 'Europe/Amsterdam', 'Europe/Brussels',
+	'Europe/Zurich', 'Europe/Vienna', 'Europe/Stockholm', 'Europe/Oslo',
+	'Europe/Copenhagen', 'Europe/Helsinki', 'Europe/Warsaw', 'Europe/Prague',
+	'Europe/Budapest', 'Europe/Bucharest', 'Europe/Athens', 'Europe/Istanbul',
+	'Europe/Moscow', 'Europe/Kiev',
+	'Asia/Dubai', 'Asia/Riyadh', 'Asia/Tehran', 'Asia/Karachi',
+	'Asia/Kolkata', 'Asia/Colombo', 'Asia/Dhaka', 'Asia/Bangkok',
+	'Asia/Jakarta', 'Asia/Singapore', 'Asia/Kuala_Lumpur',
+	'Asia/Hong_Kong', 'Asia/Shanghai', 'Asia/Taipei', 'Asia/Seoul',
+	'Asia/Tokyo', 'Asia/Manila',
+	'Australia/Perth', 'Australia/Adelaide', 'Australia/Sydney',
+	'Australia/Melbourne', 'Australia/Brisbane',
+	'Pacific/Auckland', 'Pacific/Fiji',
+	'Africa/Cairo', 'Africa/Lagos', 'Africa/Nairobi',
+	'Africa/Johannesburg', 'Africa/Casablanca',
+	'UTC'
+];
+
+function tzCityName(tz) {
+	var parts = tz.split('/');
+	var city = parts[parts.length - 1];
+	return city.replace(/_/g, ' ');
+}
+
+function populateTimezoneSelects() {
+	// get all IANA timezones (modern browsers) or fall back to curated list
+	var allTz;
+	try {
+		allTz = Intl.supportedValuesOf('timeZone');
+	} catch(e) {
+		allTz = TZ_COMMON.slice();
+	}
+
+	// group by region
+	var regions = {};
+	for (var i = 0; i < allTz.length; i++) {
+		var tz = allTz[i];
+		var slash = tz.indexOf('/');
+		var region = slash > -1 ? tz.substring(0, slash) : 'Other';
+		if (!regions[region]) regions[region] = [];
+		regions[region].push(tz);
+	}
+
+	var regionOrder = ['America', 'Europe', 'Asia', 'Africa', 'Australia', 'Pacific', 'Atlantic', 'Indian', 'Antarctica', 'Arctic', 'Other'];
+
+	for (var n = 1; n <= 4; n++) {
+		var select = document.getElementById('options_tz_' + n);
+		if (!select || select.tagName !== 'SELECT') continue;
+
+		// empty option
+		var empty = document.createElement('option');
+		empty.value = '';
+		empty.textContent = '— Select timezone —';
+		select.appendChild(empty);
+
+		// common timezones group first
+		var commonGrp = document.createElement('optgroup');
+		commonGrp.label = 'Common';
+		for (var c = 0; c < TZ_COMMON.length; c++) {
+			var opt = document.createElement('option');
+			opt.value = TZ_COMMON[c];
+			opt.textContent = tzCityName(TZ_COMMON[c]) + '  (' + TZ_COMMON[c] + ')';
+			commonGrp.appendChild(opt);
+		}
+		select.appendChild(commonGrp);
+
+		// all timezones grouped by region
+		for (var r = 0; r < regionOrder.length; r++) {
+			var rName = regionOrder[r];
+			if (!regions[rName]) continue;
+			var grp = document.createElement('optgroup');
+			grp.label = 'All — ' + rName;
+			for (var j = 0; j < regions[rName].length; j++) {
+				var tzVal = regions[rName][j];
+				var opt2 = document.createElement('option');
+				opt2.value = tzVal;
+				opt2.textContent = tzCityName(tzVal) + '  (' + tzVal + ')';
+				grp.appendChild(opt2);
+			}
+			select.appendChild(grp);
+		}
+	}
+}
+
+function bindTimezoneAutoLabel() {
+	for (var n = 1; n <= 4; n++) {
+		(function(idx) {
+			var select = document.getElementById('options_tz_' + idx);
+			var labelInput = document.getElementById('options_tz_label_' + idx);
+			if (!select || !labelInput) return;
+
+			select.addEventListener('change', function() {
+				// auto-fill label if it's empty or was previously auto-filled
+				var current = labelInput.value.trim();
+				var wasAuto = !current || labelInput.getAttribute('data-auto') === '1';
+				if (wasAuto && select.value) {
+					var city = tzCityName(select.value);
+					labelInput.value = city;
+					labelInput.setAttribute('data-auto', '1');
+					setConfig('tz_label_' + idx, city);
+				}
+			});
+			labelInput.addEventListener('input', function() {
+				// user is manually editing, stop auto-filling
+				labelInput.setAttribute('data-auto', '0');
+			});
+		})(n);
 	}
 }
 

@@ -512,6 +512,9 @@ input[type="file"]::-webkit-file-upload-button {
 .subopt input[type="text"] {
 	width: 9em;
 }
+.subopt select {
+	width: 16em;
+}
 kbd {
 	background: #eee;
 	border: 1px solid #ccc;
