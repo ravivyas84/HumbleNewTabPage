@@ -1630,75 +1630,62 @@ function showOptions(show) {
 	}
 }
 
-// ===== Timezone Widget =====
-var tzOffsetMinutes = 0; // offset from "now" applied by slider interaction
+// ===== Timezone Widget (card layout) =====
+var tzOffsetMinutes = 0;
 var tzInterval = null;
-var tzData = []; // { tz, label, slider, timeDisplay, ticksContainer, isHome }
+var tzCards = []; // { tz, timeEl, periodEl, dayEl, utcEl, offsetBadge }
 
-function getTimeInTimezone(tz, offsetMinutes) {
+function tzGetFullInfo(tz, offsetMinutes) {
 	var now = new Date();
 	now.setMinutes(now.getMinutes() + offsetMinutes);
 	try {
-		var formatter = new Intl.DateTimeFormat('en-US', {
-			timeZone: tz,
-			hour: 'numeric',
-			minute: '2-digit',
-			hour12: true
-		});
-		var dayFormatter = new Intl.DateTimeFormat('en-US', {
-			timeZone: tz,
-			weekday: 'short'
-		});
-		return {
-			time: formatter.format(now),
-			day: dayFormatter.format(now),
-			minutes: getMinutesInTimezone(tz, now)
-		};
-	} catch(e) {
-		return { time: '\u2014', day: '', minutes: 0 };
-	}
-}
-
-function getMinutesInTimezone(tz, date) {
-	try {
-		var parts = new Intl.DateTimeFormat('en-US', {
-			timeZone: tz,
-			hour: 'numeric',
-			minute: 'numeric',
-			hour12: false
-		}).formatToParts(date);
-		var h = 0, m = 0;
-		for (var i = 0; i < parts.length; i++) {
-			if (parts[i].type === 'hour') h = parseInt(parts[i].value, 10);
-			if (parts[i].type === 'minute') m = parseInt(parts[i].value, 10);
+		var parts24 = new Intl.DateTimeFormat('en-US', {
+			timeZone: tz, hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: false
+		}).formatToParts(now);
+		var h = 0, m = 0, s = 0;
+		for (var i = 0; i < parts24.length; i++) {
+			if (parts24[i].type === 'hour') h = parseInt(parts24[i].value, 10);
+			if (parts24[i].type === 'minute') m = parseInt(parts24[i].value, 10);
+			if (parts24[i].type === 'second') s = parseInt(parts24[i].value, 10);
 		}
 		if (h === 24) h = 0;
-		return h * 60 + m;
+
+		var dayFmt = new Intl.DateTimeFormat('en-US', {
+			timeZone: tz, weekday: 'long', month: 'short', day: 'numeric'
+		});
+
+		// UTC offset
+		var utcOffsetMin = tzGetUtcOffset(tz, now);
+		var sign = utcOffsetMin >= 0 ? '+' : '-';
+		var absOff = Math.abs(utcOffsetMin);
+		var offH = Math.floor(absOff / 60);
+		var offM = absOff % 60;
+		var utcStr = 'UTC ' + sign + offH + (offM ? ':' + (offM < 10 ? '0' : '') + offM : '');
+
+		// period
+		var period, periodEmoji;
+		if (h >= 6 && h < 18) { period = 'Day'; periodEmoji = '\u2600\uFE0F'; }
+		else { period = 'Night'; periodEmoji = '\uD83C\uDF19'; }
+
+		var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
+
+		return {
+			time: pad(h) + ':' + pad(m) + ':' + pad(s),
+			day: dayFmt.format(now),
+			utc: utcStr,
+			period: period,
+			periodEmoji: periodEmoji
+		};
 	} catch(e) {
-		return 0;
+		return { time: '--:--:--', day: '', utc: '', period: '', periodEmoji: '' };
 	}
 }
 
-// format hour number to label: 0->"12a", 6->"6a", 12->"12p", 18->"6p"
-function formatHourLabel(h) {
-	h = ((h % 24) + 24) % 24;
-	if (h === 0) return '12a';
-	if (h === 12) return '12p';
-	if (h < 12) return h + 'a';
-	return (h - 12) + 'p';
-}
-
-// get the UTC offset in minutes for a timezone at a given date
-function getUtcOffset(tz, date) {
+function tzGetUtcOffset(tz, date) {
 	try {
 		var parts = new Intl.DateTimeFormat('en-US', {
-			timeZone: tz,
-			hour: 'numeric',
-			minute: 'numeric',
-			hour12: false,
-			year: 'numeric',
-			month: '2-digit',
-			day: '2-digit'
+			timeZone: tz, hour: 'numeric', minute: 'numeric', hour12: false,
+			year: 'numeric', month: '2-digit', day: '2-digit'
 		}).formatToParts(date);
 		var h = 0, m = 0, Y = 0, M = 0, D = 0;
 		for (var i = 0; i < parts.length; i++) {
@@ -1709,66 +1696,50 @@ function getUtcOffset(tz, date) {
 			if (parts[i].type === 'day') D = parseInt(parts[i].value, 10);
 		}
 		if (h === 24) h = 0;
-		// local time in that tz as minutes since epoch-ish
-		var localMinutes = ((Y * 400 + M * 32 + D) * 1440) + h * 60 + m;
-		// utc time
-		var utcH = date.getUTCHours(), utcM = date.getUTCMinutes();
-		var utcY = date.getUTCFullYear(), utcMo = date.getUTCMonth() + 1, utcD = date.getUTCDate();
-		var utcMinutes = ((utcY * 400 + utcMo * 32 + utcD) * 1440) + utcH * 60 + utcM;
-		return localMinutes - utcMinutes;
-	} catch(e) {
-		return 0;
-	}
+		var local = ((Y * 400 + M * 32 + D) * 1440) + h * 60 + m;
+		var uH = date.getUTCHours(), uM = date.getUTCMinutes();
+		var uY = date.getUTCFullYear(), uMo = date.getUTCMonth() + 1, uD = date.getUTCDate();
+		var utc = ((uY * 400 + uMo * 32 + uD) * 1440) + uH * 60 + uM;
+		return local - utc;
+	} catch(e) { return 0; }
 }
 
-// update tick marks on all bars based on the hovered bar's timezone
-function updateTicks(hoveredIndex) {
-	var now = new Date();
-	now.setMinutes(now.getMinutes() + tzOffsetMinutes);
+function tzFormatOffset(minutes) {
+	var sign = minutes >= 0 ? '+' : '-';
+	var abs = Math.abs(minutes);
+	var h = Math.floor(abs / 60);
+	var m = abs % 60;
+	return sign + h + 'h' + (m ? ' ' + m + 'm' : '');
+}
 
-	var hoveredTz = tzData[hoveredIndex].tz;
-	var hoveredOffset = getUtcOffset(hoveredTz, now);
-
-	// generate tick hours in the hovered timezone (every 3 hours)
-	var tickHours = [0, 3, 6, 9, 12, 15, 18, 21];
-
-	for (var i = 0; i < tzData.length; i++) {
-		var entry = tzData[i];
-		var container = entry.ticksContainer;
-		container.innerHTML = '';
-
-		var thisOffset = getUtcOffset(entry.tz, now);
-		var diffMinutes = thisOffset - hoveredOffset;
-
-		for (var t = 0; t < tickHours.length; t++) {
-			var hoveredMinute = tickHours[t] * 60; // minute-of-day in hovered tz
-			var localMinute = hoveredMinute + diffMinutes;
-			// wrap to 0-1439
-			localMinute = ((localMinute % 1440) + 1440) % 1440;
-
-			var pct = (localMinute / 1439) * 100;
-
-			// tick line
-			var tick = document.createElement('div');
-			tick.className = 'tz-tick';
-			tick.style.left = pct + '%';
-			container.appendChild(tick);
-
-			// tick label — show the local hour in this timezone
-			var localHour = Math.floor(localMinute / 60);
-			var label = document.createElement('div');
-			label.className = 'tz-tick-label';
-			label.textContent = formatHourLabel(localHour);
-			label.style.left = pct + '%';
-			container.appendChild(label);
+function tzUpdateAll() {
+	var resetEl = document.querySelector('.tz-reset');
+	var offsetBadge = document.querySelector('.tz-offset-badge');
+	if (resetEl) {
+		if (tzOffsetMinutes !== 0) resetEl.classList.add('visible');
+		else resetEl.classList.remove('visible');
+	}
+	if (offsetBadge) {
+		if (tzOffsetMinutes !== 0) {
+			offsetBadge.classList.add('visible');
+			offsetBadge.textContent = tzFormatOffset(tzOffsetMinutes) + ' from now';
+		} else {
+			offsetBadge.classList.remove('visible');
 		}
+	}
+	for (var j = 0; j < tzCards.length; j++) {
+		var info = tzGetFullInfo(tzCards[j].tz, tzOffsetMinutes);
+		tzCards[j].timeEl.textContent = info.time;
+		tzCards[j].periodEl.textContent = info.period + ' ' + info.periodEmoji;
+		tzCards[j].dayEl.textContent = info.day;
+		tzCards[j].utcEl.textContent = info.utc;
 	}
 }
 
 function renderTimezones() {
 	var container = document.getElementById('timezones');
 	container.innerHTML = '';
-	tzData = [];
+	tzCards = [];
 
 	if (!getConfig('show_timezones')) {
 		container.classList.remove('visible');
@@ -1780,6 +1751,9 @@ function renderTimezones() {
 
 	var homeIndex = parseInt(getConfig('tz_home'), 10) || 1;
 
+	var cardsRow = document.createElement('div');
+	cardsRow.className = 'tz-cards';
+
 	for (var i = 1; i <= 4; i++) {
 		var tz = getConfig('tz_' + i);
 		var labelText = getConfig('tz_label_' + i);
@@ -1787,111 +1761,85 @@ function renderTimezones() {
 
 		var isHome = (i === homeIndex);
 
-		var row = document.createElement('div');
-		row.className = 'tz-row' + (isHome ? ' tz-row-home' : '');
+		var card = document.createElement('div');
+		card.className = 'tz-card' + (isHome ? ' tz-card-home' : '');
 
-		// label
-		var labelEl = document.createElement('span');
-		labelEl.className = 'tz-label';
-		labelEl.textContent = labelText;
-		if (isHome) {
-			var badge = document.createElement('span');
-			badge.className = 'tz-home-badge';
-			badge.textContent = 'home';
-			labelEl.appendChild(badge);
-		}
+		// scroll hint
+		var hint = document.createElement('div');
+		hint.className = 'tz-scroll-hint';
+		hint.textContent = '\u21C5 scroll';
 
-		// bar wrapper
-		var barWrapper = document.createElement('div');
-		barWrapper.className = 'tz-bar-wrapper';
+		// header row: name + UTC
+		var header = document.createElement('div');
+		header.className = 'tz-card-header';
+		var nameEl = document.createElement('span');
+		nameEl.className = 'tz-card-name';
+		nameEl.textContent = labelText;
+		var utcEl = document.createElement('span');
+		utcEl.className = 'tz-card-utc';
+		header.appendChild(nameEl);
+		header.appendChild(utcEl);
 
-		// time display above bar
-		var timeDisplay = document.createElement('div');
-		timeDisplay.className = 'tz-time-display';
+		// period
+		var periodEl = document.createElement('div');
+		periodEl.className = 'tz-card-period';
 
-		// bar container (slider + ticks)
-		var barContainer = document.createElement('div');
-		barContainer.className = 'tz-bar-container';
+		// time
+		var timeEl = document.createElement('div');
+		timeEl.className = 'tz-card-time';
 
-		var slider = document.createElement('input');
-		slider.type = 'range';
-		slider.className = 'tz-slider';
-		slider.min = 0;
-		slider.max = 1439;
-		slider.step = 1;
-		slider.setAttribute('data-tz', tz);
-		slider.setAttribute('data-index', String(tzData.length));
-		slider.setAttribute('aria-label', labelText + ' timezone slider');
+		// day
+		var dayEl = document.createElement('div');
+		dayEl.className = 'tz-card-day';
 
-		var ticksContainer = document.createElement('div');
-		ticksContainer.className = 'tz-ticks';
+		card.appendChild(hint);
+		card.appendChild(header);
+		card.appendChild(periodEl);
+		card.appendChild(timeEl);
+		card.appendChild(dayEl);
+		cardsRow.appendChild(card);
 
-		barContainer.appendChild(slider);
-		barContainer.appendChild(ticksContainer);
-		barWrapper.appendChild(timeDisplay);
-		barWrapper.appendChild(barContainer);
-		row.appendChild(labelEl);
-		row.appendChild(barWrapper);
-		container.appendChild(row);
+		tzCards.push({ tz: tz, timeEl: timeEl, periodEl: periodEl, dayEl: dayEl, utcEl: utcEl, card: card });
 
-		tzData.push({
-			tz: tz,
-			label: labelText,
-			slider: slider,
-			timeDisplay: timeDisplay,
-			ticksContainer: ticksContainer,
-			isHome: isHome
-		});
+		// scroll to adjust time — scroll on any card adjusts all
+		(function(cardEl) {
+			cardEl.addEventListener('wheel', function(e) {
+				e.preventDefault();
+				var delta = e.deltaY < 0 ? 60 : -60; // scroll up = forward in time
+				if (e.shiftKey) delta = delta > 0 ? 15 : -15; // shift = 15 min steps
+				tzOffsetMinutes += delta;
+				tzUpdateAll();
+			}, { passive: false });
+		})(card);
 	}
 
-	function updateAllSliders() {
-		for (var j = 0; j < tzData.length; j++) {
-			var info = getTimeInTimezone(tzData[j].tz, tzOffsetMinutes);
-			tzData[j].slider.value = info.minutes;
-			tzData[j].timeDisplay.textContent = info.time + '  ' + info.day;
-		}
-	}
+	container.appendChild(cardsRow);
 
-	// hover handlers for ticks
-	for (var k = 0; k < tzData.length; k++) {
-		(function(index) {
-			var row = tzData[index].slider.closest('.tz-row');
-			row.addEventListener('mouseenter', function() {
-				container.classList.add('show-ticks');
-				updateTicks(index);
-			});
-			row.addEventListener('mouseleave', function() {
-				container.classList.remove('show-ticks');
-			});
+	// offset badge (shows how far from "now")
+	var offsetBadge = document.createElement('div');
+	offsetBadge.className = 'tz-offset-badge';
+	container.appendChild(offsetBadge);
 
-			// slider input handler
-			tzData[index].slider.addEventListener('input', function() {
-				var tz = this.getAttribute('data-tz');
-				var currentMinutes = getMinutesInTimezone(tz, new Date());
-				var sliderMinutes = parseInt(this.value, 10);
-				var diff = sliderMinutes - currentMinutes;
-				if (diff > 720) diff -= 1440;
-				if (diff < -720) diff += 1440;
-				tzOffsetMinutes = diff;
-				updateAllSliders();
-				tzData[index].slider.value = sliderMinutes;
-				if (container.classList.contains('show-ticks'))
-					updateTicks(index);
-			});
-			tzData[index].slider.addEventListener('dblclick', function() {
-				tzOffsetMinutes = 0;
-				updateAllSliders();
-			});
-		})(k);
-	}
+	// reset pill
+	var resetWrap = document.createElement('div');
+	resetWrap.className = 'tz-reset';
+	var resetBtn = document.createElement('span');
+	resetBtn.className = 'tz-reset-btn';
+	resetBtn.textContent = 'Back to now';
+	resetBtn.addEventListener('click', function() {
+		tzOffsetMinutes = 0;
+		tzUpdateAll();
+	});
+	resetWrap.appendChild(resetBtn);
+	container.appendChild(resetWrap);
 
-	updateAllSliders();
+	tzUpdateAll();
 
-	// tick every minute
+	// tick every second for live seconds display
 	if (tzInterval) clearInterval(tzInterval);
 	tzInterval = setInterval(function() {
-		if (tzOffsetMinutes === 0) updateAllSliders();
-	}, 60000);
+		tzUpdateAll();
+	}, 1000);
 }
 
 // ===== Search / Filter =====
