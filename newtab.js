@@ -1121,7 +1121,7 @@ var config = {
 	number_top: 10,
 	number_closed: 10,
 	number_recent: 10,
-	show_timezones: 0,
+	show_timezones: 1,
 	tz_home: '1',
 	tz_1: 'America/New_York',
 	tz_label_1: 'New York',
@@ -1662,22 +1662,26 @@ function tzGetFullInfo(tz, offsetMinutes) {
 		var offM = absOff % 60;
 		var utcStr = 'UTC ' + sign + offH + (offM ? ':' + (offM < 10 ? '0' : '') + offM : '');
 
-		// period
-		var period, periodEmoji;
-		if (h >= 6 && h < 18) { period = 'Day'; periodEmoji = '\u2600\uFE0F'; }
-		else { period = 'Night'; periodEmoji = '\uD83C\uDF19'; }
+		// period — more granular for smooth visual transitions
+		var period, periodEmoji, isDay;
+		if (h >= 6 && h < 18) {
+			isDay = true; period = 'Day'; periodEmoji = '\u2600\uFE0F';
+		} else {
+			isDay = false; period = 'Night'; periodEmoji = '\uD83C\uDF19';
+		}
 
 		var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
 
 		return {
 			time: pad(h) + ':' + pad(m) + ':' + pad(s),
-			day: dayFmt.format(now),
+			date: dayFmt.format(now),
 			utc: utcStr,
 			period: period,
-			periodEmoji: periodEmoji
+			periodEmoji: periodEmoji,
+			isDay: isDay
 		};
 	} catch(e) {
-		return { time: '--:--:--', day: '', utc: '', period: '', periodEmoji: '' };
+		return { time: '--:--:--', date: '', utc: '', period: '', periodEmoji: '', isDay: true };
 	}
 }
 
@@ -1731,8 +1735,17 @@ function tzUpdateAll() {
 		var info = tzGetFullInfo(tzCards[j].tz, tzOffsetMinutes);
 		tzCards[j].timeEl.textContent = info.time;
 		tzCards[j].periodEl.textContent = info.period + ' ' + info.periodEmoji;
-		tzCards[j].dayEl.textContent = info.day;
+		tzCards[j].dateEl.textContent = info.date;
 		tzCards[j].utcEl.textContent = info.utc;
+		// toggle day/night theme on card
+		var c = tzCards[j].card;
+		if (info.isDay) {
+			c.classList.add('tz-card-day');
+			c.classList.remove('tz-card-night');
+		} else {
+			c.classList.add('tz-card-night');
+			c.classList.remove('tz-card-day');
+		}
 	}
 }
 
@@ -1788,18 +1801,18 @@ function renderTimezones() {
 		var timeEl = document.createElement('div');
 		timeEl.className = 'tz-card-time';
 
-		// day
-		var dayEl = document.createElement('div');
-		dayEl.className = 'tz-card-day';
+		// date
+		var dateEl = document.createElement('div');
+		dateEl.className = 'tz-card-date';
 
 		card.appendChild(hint);
 		card.appendChild(header);
 		card.appendChild(periodEl);
 		card.appendChild(timeEl);
-		card.appendChild(dayEl);
+		card.appendChild(dateEl);
 		cardsRow.appendChild(card);
 
-		tzCards.push({ tz: tz, timeEl: timeEl, periodEl: periodEl, dayEl: dayEl, utcEl: utcEl, card: card });
+		tzCards.push({ tz: tz, timeEl: timeEl, periodEl: periodEl, dateEl: dateEl, utcEl: utcEl, card: card });
 
 		// scroll to adjust time — scroll on any card adjusts all
 		(function(cardEl) {
